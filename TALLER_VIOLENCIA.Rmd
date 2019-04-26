@@ -47,7 +47,11 @@ library(tidyr)
 
 ```
 
-Se procede con la lectura de los datos
+Para ejecutar los codigos se deben descargar de el siguiente link https://github.com/luisdiaz1983/ANALISIS-EXPLORATORIO-DE-DATOS , los archivos mencionados posteriormente:
+1- dane.csv
+2- Delitos_sexuales_2017.csv
+3- gadm36_COL_1.shp, este último requiere descargar una carpeta comprimida y se debe importar desde la misma carpeta.
+
 
 ```{r lectura_datos}
 setwd("C:/Users/Luis Eduardo Diaz/Documents/MAESTRIA/ANALISIS EXPLORATORIO DE DATOS/CLASE 4")
