@@ -573,6 +573,14 @@ print(mapColDep, vp = vplayout(1:2, 1))  # key is to define vplayout
 print(mapColDepsan, vp = vplayout(1, 2))
 print(mapColDepprov, vp = vplayout(2, 2))
 ```
+
+Gráfico Edad vs tipo de delito
+
+```{r pindice}
+t <- ggplot(d_sex3, aes(x = delitocod, y = edad)) + geom_boxplot(outlier.size = 0.1) +  theme(axis.text.x = element_text(size  = 10,angle = 45,hjust = 1,vjust = 1)) + labs(title = "Edad vs delito", fill = "") + scale_y_continuous(limits=c(0,100), breaks=seq(0,100,10), expand = c(0, 0)) + theme_bw()
+t
+```
+
 # Inclusión de indice en la base d_sex3
 
 A continuacion se ingresa la columna de indice en el dataframe d_sex3, tomándola como variable objetivo.
