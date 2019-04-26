@@ -193,7 +193,7 @@ $(document).ready(function () {
 
 <div id="analisis-de-violencia-sexual-en-colombia-en-el-2017" class="section level2">
 <h2>ANALISIS DE VIOLENCIA SEXUAL EN COLOMBIA EN EL 2017</h2>
-<p>Se procede con la lectura de los datos</p>
+<p>Para ejecutar los codigos se deben descargar de el siguiente link <a href="https://github.com/luisdiaz1983/ANALISIS-EXPLORATORIO-DE-DATOS" class="uri">https://github.com/luisdiaz1983/ANALISIS-EXPLORATORIO-DE-DATOS</a> , los archivos mencionados posteriormente: 1- dane.csv 2- Delitos_sexuales_2017.csv 3- gadm36_COL_1.shp, este último requiere descargar una carpeta comprimida y se debe importar desde la misma carpeta.</p>
 <pre class="r"><code>setwd(&quot;C:/Users/Luis Eduardo Diaz/Documents/MAESTRIA/ANALISIS EXPLORATORIO DE DATOS/CLASE 4&quot;)
 
 dane &lt;- read_delim(&quot;dane.csv&quot;, &quot;;&quot;, escape_double = FALSE, col_types = cols(MPIO = col_character()), locale = locale(encoding = &quot;ISO-8859-1&quot;,asciify = TRUE), trim_ws = TRUE)
