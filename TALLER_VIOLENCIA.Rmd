@@ -1,0 +1,601 @@
+---
+title: "Taller Análisis Exporatorio de Datos"
+author: "Luis Eduardo Diaz Castro y Andrés Hernandez Acosta"
+date: "22 de abril de 2019"
+output: html_document
+---
+
+## ANALISIS DE VIOLENCIA SEXUAL EN COLOMBIA EN EL 2017
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r cargar_librerias, include = FALSE}
+#rm(list=ls(all=TRUE))
+#options(encoding = "UTF-8")
+
+#install.packages("rgdal")
+#install.packages("sp")
+#install.packages("RColorBrewer")
+#install.packages("ggplot2")
+#install.packages("maptools")
+#install.packages("scales")
+#install.packages("lubridate")
+#install.packages("dplyr")
+#install.packages("readr")
+#install.packages("sqldf")
+#install.packages("janitor")
+#install.packages("epiDisplay")
+#install.packages("raster")
+library(epiDisplay)
+library(janitor)
+library(rgdal)
+library(sp)
+library(RColorBrewer)
+library(ggplot2)
+library(maptools)
+library(scales)
+library(lubridate)
+library(dplyr)
+library(readr)
+library(sqldf)
+library(raster)
+library(grid)
+library(gridExtra)
+library(tidyr)
+
+```
+
+Se procede con la lectura de los datos
+
+```{r lectura_datos}
+setwd("C:/Users/Luis Eduardo Diaz/Documents/MAESTRIA/ANALISIS EXPLORATORIO DE DATOS/CLASE 4")
+
+dane <- read_delim("dane.csv", ";", escape_double = FALSE, col_types = cols(MPIO = col_character()), locale = locale(encoding = "ISO-8859-1",asciify = TRUE), trim_ws = TRUE)
+d_sex <- read_csv("Delitos_sexuales_2017.csv")
+ohsCol2 <- shapefile("C:/Users/Luis Eduardo Diaz/Documents/MAESTRIA/ANALISIS EXPLORATORIO DE DATOS/CLASE 4/gadm36_COL_shp/gadm36_COL_1.shp") #se usa para crear mapa de delitos
+```
+
+Verificamos que esten bien cargados los dataframes, a continuación verificamos el dataframe "d_sex" 
+
+```{r verify, results="hide"}
+summary(d_sex)
+dim(d_sex)
+head(d_sex)
+tail(d_sex)
+sapply(d_sex,class)
+```
+
+Igual con el dataframe "dane"
+
+```{r verifydane, results="hide"}
+summary(dane)
+dim(dane)
+head(dane)
+tail(dane)
+sapply(dane,class)
+```
+
+Una vez realizado esto procedemos a verificar Missing Values "NA" y "-"
+
+```{r id_NA}
+sapply(d_sex, function(x) sum(is.na(x)))
+sapply(d_sex, function(x){ length(which(x == "-"))})
+```
+
+# Operaciones con Variables del dataframe d_sex
+
+Debido a que tenemos variables con mayusculas, tíldes, formato diferente de fecha y hora, se procede a realizar los ajustes necesarios.
+
+Primero haremos que los nombres de las variables esten en minúscula para disminuir la probabilidad de cometer errores con las mismas:
+
+```{r oper_var}
+colnames(d_sex)<-tolower(make.names(chartr('áéíóúñ','aeioun',colnames(d_sex))))
+colnames(d_sex)<-tolower(make.names(chartr('áéíóúñ','aeioun',colnames(d_sex))))
+colnames(d_sex)<-chartr('.','_',colnames(d_sex))
+```
+
+Para poder trabajar con el gráfico del mapa de Colombia se deben cambiar los registros de departamento y municipio a minúsculas y sin tíldes de los dataframes "d_sex"" y "dane", como se muestra a continuación:
+
+```{r change}
+d_sex$departamento <- tolower(chartr('áéíóúñ','aeioun',d_sex$departamento))
+d_sex$departamento <- tolower(chartr('áéíóúñ','aeioun',d_sex$departamento))
+d_sex$municipio <- tolower(chartr('áéíóúñ','aeioun',d_sex$municipio))
+d_sex$municipio <- tolower(chartr('áéíóúñ','aeioun',d_sex$municipio))
+dane$DPNOM <- tolower(chartr('áéíóúñ','aeioun',dane$DPNOM))
+dane$DPNOM <- tolower(chartr('áéíóúñ','aeioun',dane$DPNOM))
+dane$MPIO <- tolower(chartr('áéíóúñ','aeioun',dane$MPIO))
+dane$MPIO <- tolower(chartr('áéíóúñ','aeioun',dane$MPIO))
+```
+
+También se realizan los ajustes de tipo Fecha y se agrega factor a una nueva varianble "h" con formato 24 horas:
+
+```{r data_hour}
+d_sex$fecha <-as.Date(d_sex$fecha,format="%m/%d/%Y")
+d_sex$h <-hour(mdy_hms(d_sex$hora))
+d_sex$h<-as.factor(d_sex$h)
+```
+
+# Codificación de variable delito
+
+Esta variable contiene niveles con demasiados caracteres, asi se decide recodificar los niveles de la variable, para poder analizarla de mejor manera:
+
+```{r oper_var_treatment}
+d_sex$delito<-as.factor(d_sex$delito)
+levels(d_sex$delito)
+d_sex$delitocod<-d_sex$delito
+levels(d_sex$delitocod) <- c("205","206","207","208","209","210","2101","211","2111","2112","2113","2114","2115","213","2131","214","216","217","2171","218","219","2191")
+View(d_sex$delito)
+View(d_sex$delitocod)
+```
+
+# Tratamiento de Missing Values variable "edad"
+
+Debido a las inconsistencias entre las edades y el delito se utiliza la siguiente linea para realizar la identificacion de datos mal etiquetados,  se procede a realizar ajustes de la siguiente manera:
+
+Primero se deben encontrar los valores de la media de la edad para ser reemplazados en valores "-" asociados a: , menores a 18 años y mayores a 18.
+
+```{r var_tabincons, results="hide"}
+
+View(table(d_sex$edad<=14, d_sex$delito, dnn=c("edad", "delito")))
+#View(filter(d_sex,is.na(edad)))
+```
+
+Delitos en menores de 14 años
+
+```{r menor14}
+edadmenor14<-d_sex %>% dplyr::select(edad,delitocod)%>%filter(edad<=14)
+round(mean(edadmenor14$edad),0)
+```
+
+Delitos en menores de 18 años
+
+```{r menor18}
+edadmenor18<-d_sex %>% dplyr::select(edad,delitocod)%>%filter(edad<=18)
+round(mean(edadmenor18$edad),0)
+```
+
+Delitos en mayores de 18 años
+
+```{r mayor18}
+edadmayor18<-d_sex %>% dplyr::select(edad,delitocod)%>%filter(edad>18)
+round(mean(edadmayor18$edad),0)
+```
+
+Para los valores NA de edad se utiliza el delito como variable para determinar la edad, para menores de 14 el valor identificado es de 10
+
+```{r adjmenor14}
+d_sex2<- d_sex %>%mutate(edad = ifelse((is.na(edad)) & (delitocod=="208" | delitocod=="209"| delitocod=="211"| delitocod=="2115") , round(mean(edadmenor14$edad),0), edad))
+View(d_sex2 %>% dplyr::select(edad,delitocod)%>%filter(delitocod=="208" | delitocod=="209"| delitocod=="211"| delitocod=="2115"))
+```
+
+Para los valores NA de edad se utiliza el delito como variable para determinar la edad, para menores de 18 el valor identificado es de 12
+
+```{r adjmenor18}
+d_sex2<- d_sex2 %>%mutate(edad = ifelse((is.na(edad)) & (delitocod=="217" | delitocod=="2171"| delitocod=="218"| delitocod=="219"| delitocod=="213") , round(mean(edadmenor18$edad),0), edad))
+View(d_sex2 %>% dplyr::select(edad,delitocod)%>%filter(delitocod=="217" | delitocod=="2171"| delitocod=="218"| delitocod=="219"| delitocod=="213"))
+```
+
+Para los valores NA de edad se utiliza el delito como variable para determinar la edad, para mayores de 18 el valor identificado es de 31
+
+```{r adjmayor18}
+d_sex2<- d_sex2 %>%mutate(edad = ifelse((is.na(edad)) , round(mean(edadmayor18$edad),0), edad))
+View(d_sex2 %>% dplyr::select(edad,delitocod))
+```
+
+Para los valores NA de edad se utiliza el delito como variable para determinar la edad, para menores de 18 el valor identificado es de 12:
+
+```{r delitomenor18}
+d_sex2<- d_sex2 %>%mutate(edad = ifelse((is.na(edad)) & (delitocod=="217" | delitocod=="2171"| delitocod=="218"| delitocod=="219") , round(mean(edadmenor18$edad),0), edad))
+View(d_sex2 %>% dplyr::select(edad,delitocod)%>%filter(delitocod=="217" | delitocod=="2171"| delitocod=="218"| delitocod=="219"))
+
+#View(filter(d_sex2,is.na(edad)))
+```
+
+# Otros Valores NA y Outliers
+
+De acuerdo con lo observado anteriormente la variable codigo_dane presenta un missing value, este se elimina ya que no afeta el análisis.
+
+```{r danena}
+d_sex2 <- d_sex2[-which(is.na(d_sex$codigo_dane)),]
+summary(d_sex2)
+```
+
+Con la variable edad tambien pudimos observar que su valor mayor esta muy alejado de la media, por lo tanto se procede con la eliminación de este registro.
+
+```{r ageoutlier}
+max(d_sex2$edad)
+d_sex2 <- d_sex2[-which(d_sex2$edad == max(d_sex2$edad)),]
+```
+
+# Ajuste de Registros mal Digitados o Categorizados 
+
+Se procede a realizar ajustes de los registros con errores de captura, de acuerdo al tipo de crimen y la edad del agredido
+
+```{r crime_age, results="hide"}
+d_sex3<- d_sex2
+View(table(d_sex3$edad<=14, d_sex3$delitocod, dnn=c("edad", "delito")))
+
+d_sex3$delitocod<-as.character(d_sex3$delitocod)
+d_sex3<- d_sex3 %>%mutate(delitocod = ifelse((edad>14) & (delitocod=="208") ,205, delitocod))
+d_sex3<- d_sex3 %>%mutate(delitocod = ifelse((edad>14) & (delitocod=="211") ,205, delitocod))
+d_sex3<- d_sex3 %>%mutate(delitocod = ifelse((edad>14) & (delitocod=="2115") ,206, delitocod))
+d_sex3<- d_sex3 %>%mutate(delitocod = ifelse((edad>18) & (delitocod=="213") ,2131, delitocod))
+d_sex3<- d_sex3 %>%mutate(delitocod = ifelse((edad<18) & (delitocod=="2131") ,213, delitocod))
+d_sex3<- d_sex3 %>%mutate(delitocod = ifelse((edad<18) & (delitocod=="214") ,213, delitocod))
+d_sex3<- d_sex3 %>%mutate(delitocod = ifelse((edad>=18) & (delitocod=="2171") ,2131, delitocod))
+d_sex3<- d_sex3 %>%mutate(delitocod = ifelse((edad>=18) & (delitocod=="217") ,2131, delitocod))
+```
+
+# Conversión de variables a factores:
+
+Para regresar a la parametrización inicial de la variable delito se deben asignar nuevamente los niveles con la descripción completa del crimen: 
+
+```{r factors_adj, results="hide"}
+d_sex3$delitocod<-as.factor(d_sex3$delitocod)
+levels(d_sex3$delitocod)
+d_sex3$delito<-d_sex3$delitocod
+levels(d_sex3$delito )<- c("ARTÍCULO 205. ACCESO CARNAL VIOLENTO",	"ARTÍCULO 206. ACTO SEXUAL VIOLENTO",	"ARTÍCULO 207. ACCESO CARNAL O ACTO SEXUAL EN PERSONA PUESTA EN INCAPACIDAD DE RESISTIR",	"ARTÍCULO 208. ACCESO CARNAL ABUSIVO CON MENOR DE 14 AÑOS",	"ARTÍCULO 209. ACTOS SEXUALES CON MENOR DE 14 AÑOS",	"ARTÍCULO 210 A. ACOSO SEXUAL",	"ARTÍCULO 210. ACCESO CARNAL O ACTO SEXUAL ABUSIVO CON INCAPAZ DE RESISTIR",	"ARTÍCULO 211. ACCESO CARNAL ABUSIVO CON MENOR DE 14 AÑOS (CIRCUNSTANCIAS AGRAVACIÓN)",	"ARTÍCULO 211. ACCESO CARNAL O ACTO SEXUAL ABUSIVO CON INCAPAZ DE RESISTIR (CIRCUNSTANCIAS AGRAVACIÓN",	"ARTÍCULO 211. ACCESO CARNAL O ACTO SEXUAL EN PERSONA PUESTA EN INCAPACIDAD DE RESISTIR  (CIRCUNSTANC",	"ARTÍCULO 211. ACCESO CARNAL VIOLENTO (CIRCUNSTANCIAS AGRAVACIÓN)",	"ARTÍCULO 211. ACTO SEXUAL VIOLENTO (CIRCUNSTANCIAS DE AGRAVACIÓN)",	"ARTÍCULO 211. ACTOS SEXUALES CON MENOR DE 14 AÑOS (CIRCUNSTANCIAS DE AGRAVACIÓN)",	"ARTÍCULO 213 A. PROXENETISMO CON MENOR DE EDAD",	"ARTÍCULO 213. INDUCCIÓN A LA PROSTITUCIÓN",	"ARTÍCULO 214. CONSTREÑIMIENTO A LA PROSTITUCIÓN",	"ARTÍCULO 216. CONSTREÑIMIENTO A LA PROSTITUCIÓN (CIRCUNSTANCIAS AGRAVACIÓN)",	"ARTÍCULO 217 A. DEMANDA DE EXPLOTACION SEXUAL COMERCIAL DE PERSONA MENOR DE 18 AÑOS DE EDAD",	"ARTÍCULO 217. ESTÍMULO A LA PROSTITUCIÓN DE MENORES",	"ARTÍCULO 218. PORNOGRAFÍA CON MENORES","ARTÍCULO 219 A. UTILIZACIÓN O FACILITACIÓN DE MEDIOS DE COMUNICACIÓN PARA OFRECER SERVICIOS SEXUALES DE MENORES","ARTÍCULO 219 B. OMISIÓN DE DENUNCIA")
+```
+
+Luego procedemos a convertir las demas variables categóricas a factor:
+
+```{r factores, results="hide"}
+d_sex3$departamento<-as.factor(d_sex3$departamento)
+levels(d_sex3$departamento)
+d_sex3$municipio<-as.factor(d_sex3$municipio)
+levels(d_sex3$municipio)
+d_sex3$dia<-as.factor(d_sex3$dia)
+levels(d_sex3$dia)
+d_sex3$clase_de_sitio<-as.factor(d_sex3$clase_de_sitio)
+levels(d_sex3$clase_de_sitio)
+d_sex3$barrio<-as.factor(d_sex3$barrio)
+levels(d_sex3$barrio)
+d_sex3$arma_empleada<-as.factor(d_sex3$arma_empleada)
+levels(d_sex3$arma_empleada)
+d_sex3$movil_agresor<-as.factor(d_sex3$movil_agresor)
+levels(d_sex3$movil_agresor)
+d_sex3$movil_victima<-as.factor(d_sex3$movil_victima)
+levels(d_sex3$movil_victima)
+d_sex3$sexo<-as.factor(d_sex3$sexo)
+levels(d_sex3$sexo)
+d_sex3$estado_civil<-as.factor(d_sex3$estado_civil)
+levels(d_sex3$estado_civil)
+d_sex3$escolaridad<-as.factor(d_sex3$escolaridad)
+levels(d_sex3$escolaridad)
+d_sex3$profesion<-as.factor(d_sex3$profesion)
+levels(d_sex3$profesion)
+d_sex3$pais_de_nacimiento<-as.factor(d_sex3$pais_de_nacimiento)
+levels(d_sex3$pais_de_nacimiento)
+d_sex3$zona<-as.factor(d_sex3$zona)
+levels(d_sex3$zona)
+d_sex3$clase_de_empleado<-as.factor(d_sex3$clase_de_empleado)
+levels(d_sex3$clase_de_empleado)
+d_sex3$codigo_dane<-as.factor(d_sex3$codigo_dane)
+levels(d_sex3$codigo_dane)
+```
+
+## ANÁLISIS GRÁFICO DE VARIABLES
+
+## Análisis Univariado
+
+Debido a que el dataframe principal contiene muchas variables categoricas se procede a realizar análisis gráfico de barras por frecuencia de las variables.
+
+1 - Gráfica de Delitos Sexuales por Departamento
+
+```{r xdpto}
+dptosums<-table(d_sex3$departamento)
+dpto <- as.data.frame(dptosums)
+colnames(dpto) <- c("departamento", "count")
+
+dpto <- transform(dpto, departamento=reorder(departamento, count))
+
+ggplot(dpto) + geom_bar(aes(x=departamento, y=count), stat="identity", fill="steelblue") + 
+  geom_text(aes(x=departamento,  y=count, hjust= 0.0001, label=count)) + labs(title = "Cantidad de Delitos Sexuales por Departamento", fill = "") + coord_flip() + theme_bw() + theme(axis.text.y = element_text(size=(rel(1))))
+```
+
+2- Gráfica por Tipo de Ddelito
+```{r xcrime}
+crimesums <- table(d_sex3$delitocod)
+crime <- as.data.frame(crimesums)
+colnames(crime) <- c("delito_cod", "count")
+crime <- transform(crime, delito_cod=reorder(delito_cod, count))
+
+ggplot(crime) + geom_bar(aes(x=delito_cod, y=count), stat="identity", fill="lightblue") + 
+  geom_text(aes(x=delito_cod,  y=count, hjust= 0.5, label=count)) + labs(title = "Frecuencia por Tipo de Delito", fill = "") + coord_flip() + theme_bw() + theme(axis.text.y = element_text(size=(rel(0.9))))
+```
+
+3- Gráfica de delitos sexuales por zona
+
+```{r xzona}
+zonesums <- table(d_sex3$zona)
+zone <- as.data.frame(zonesums)
+colnames(zone) <- c("zona", "count")
+zone <- transform(zone, zona=reorder(zona, count))
+
+ggplot(zone) + geom_bar(aes(x=zona, y=count), stat="identity", fill="cyan4") + 
+  geom_text(aes(x=zona,  y=count, vjust= 0.1, label=count)) + labs(title = "Frecuencia por Zona", fill = "") +
+  theme_bw() +  theme(axis.text.x = element_text(size  = 10,angle = 45,hjust = 1,vjust = 1))
+```
+
+4- Gráfica de delitos sexuales por hora
+
+```{r xhour}
+Hoursums <- table(d_sex3$h)
+Hour <- as.data.frame(Hoursums)
+colnames(Hour) <- c("hora", "count")
+
+ggplot(Hour) + geom_bar(aes(x=hora, y=count), stat="identity", fill="steelblue") + 
+  geom_text(aes(x=hora,  y=count, vjust= 0.1, label=count)) + labs(title = "Frecuencia por Hora del Ataque", fill = "") +
+  theme_bw() +  theme(axis.text.x = element_text(size  = 10,angle = 45,hjust = 1,vjust = 1))
+```
+
+5- Tabla delitos sexuales por dia
+
+Se toma en consideración una tabla de frecuencia de delitos por día y probabilidad de ocurrencia:
+
+```{R sexdaytab}
+table(d_sex3$dia)
+prop.table(table(d_sex3$dia))
+```
+
+6- Histograma por arma empleada
+
+```{r xweapon}
+weaponsums <- table(d_sex3$arma_empleada)
+weapon <- as.data.frame(weaponsums)
+colnames(weapon) <- c("arma_empleada", "count")
+weapon <- transform(weapon, arma_empleada=reorder(arma_empleada, count))
+
+ggplot(weapon) + geom_bar(aes(x=arma_empleada, y=count), stat="identity", fill="deepskyblue3") + 
+  geom_text(aes(x=arma_empleada,  y=count, vjust= 0.1, label=count)) + labs(title = "Frecuencia por arma empleada", fill = "") +
+  theme_bw() +  theme(axis.text.x = element_text(size  = 10,angle = 45,hjust = 1,vjust = 1))
+```
+
+7- Proporción Sexo
+
+```{R sexprop}
+table(d_sex3$sexo)
+prop.table(table(d_sex3$sexo))
+```
+
+Adicionalmente se considera agrupar la variable edad y realizar una tabla de frecuencias para evaluar los grupos de edad que son mas vulnerables a este tipo de delitos:
+
+Cálculo de número de clases "k"
+```{R k}
+#tabyl(d_sex3$edad, sort = TRUE)
+#tab1(d_sex3$edad, sort.group = "decreasing", cum.percent = TRUE)
+k <- (1 + 3.332*log(29191))
+k
+```
+
+Cálculo de Rango de cada Clase "k"
+
+```{r amp}
+Amp <- max(d_sex3$edad)/k
+Amp
+```
+
+A continuación se procede con la tabla y posterior gráfica:
+  
+```{r agerang}
+attach(d_sex3)
+breaks <- seq(from = min(edad), to = max(edad), by=3)
+rango_edad <- cut(edad, breaks = breaks, right=FALSE, include.lowest = TRUE)
+#cbind(table(rango_edad))
+#tabyl(rango_edad, sort = FALSE)
+tab1(rango_edad, sort.group = FALSE, cum.percent = TRUE)
+detach(d_sex3)
+```
+
+## Análisis Bivariado
+
+En esta sección se pretende encontrar las relaciones entre varias variables:
+
+```{r sexage}
+
+meanFunction <- function(x){
+  return(data.frame(y=round(mean(x),2),label=round(mean(x,na.rm=T),2)))
+  }
+
+g <- ggplot(data = d_sex3, aes(x = sexo, y = edad, fill=sexo)) + geom_boxplot(width = 0.5) + 
+  stat_summary(fun.y = mean, geom = "point",colour = "darkred", size=2) +
+  stat_summary(fun.data = meanFunction, geom ="text", color = "black", size = 4, hjust = 1, vjust = -0.1) + theme_bw()
+
+df <- ggplot_build(g)$data[[1]]
+
+
+df <- ggplot_build(g)$data[[1]] %>%dplyr::select(ymin:ymax, x)%>% gather(type, value, - x) %>%arrange(x)
+
+g + annotate("text", x = df$x + 0.4, y = df$value, label = df$value, size = 4)
+```
+
+Se crea un objeto que contiene la información de la base de datos original "d_sex", y la población por departamento proyectada para el año 2017. 
+
+```{r tab_municipio}
+d_sex3$codigo_dane<-as.character(d_sex3$codigo_dane)
+dane$cdigo.dane<-as.character(dane$cdigo.dane)
+
+colnames(d_sex3)[20]<-"dane"
+colnames(dane)[6]<-"dane"
+
+tab_municipios <- sqldf("SELECT * 
+              FROM d_sex3
+             left join dane on d_sex3.dane=dane.dane")
+View(tab_municipios)
+```
+
+Con el objeto tab_municipios se realizaran todas las Gráficas con granularidad municipio
+
+## GRÁFICO DE MAPA 
+
+Granuralidad para los mapas sera departamento, y solamente revisarmenos el factor delitos/poblacion
+
+Se cambia la variable departamento a caracter temporalmente para asignar codigo para poder trabajar con las BD dane y tab_map
+
+```{r map_adj}
+
+d_sex3$departamento<-as.character(d_sex3$departamento)
+
+d_sex3<- d_sex3 %>%mutate(departamento = ifelse(departamento=="guajira" ,"la guajira", departamento))
+tab_map<-as.data.frame(as.character(ohsCol2@data[["NAME_1"]]))
+tab_map[ , "id"] <- c(0:31)
+colnames(tab_map)[1]<-"departamento"
+colnames(dane)[5]<-"habitantes"
+tab_dsex<-as.data.frame(table(d_sex3$departamento))
+tab_dsex[ , "id"] <- c(0:31)
+tab_DANE<-as.data.frame(table(dane$DPNOM))
+tab_DANE<- sqldf("SELECT tab_DANE.Var1,id 
+                 FROM tab_DANE
+                 left join tab_dsex on tab_DANE.Var1=tab_dsex.Var1")
+```
+
+La sentencia variable[condición] <- expresión permite asignar los valores de la expresión si y solo si la condición es TRUE
+
+Ahora se crea una nueva variable categorica que corresponde a los rangos para los valores de la edad
+
+```{r tabs}
+tab_DANE$id[4] <- 25
+tab_DANE$id[6] <- 13
+tab_DANE$id[31] <- 29
+
+View(tab_DANE)
+View(tab_map)
+View(tab_dsex)
+```
+
+A continuacuón se debe incluir el valor de 0 a 32 a cada tabla, correspondiente a cada departamento pensando en el Grafico de Mapa
+
+```{r join1}
+d_sex3<- sqldf("SELECT * 
+              FROM d_sex3
+              left join tab_dsex on d_sex3.departamento=tab_dsex.Var1")
+View(d_sex3)
+table(d_sex3$departamento == d_sex3$Var1)
+```
+
+```{r join2}
+dane<- sqldf("SELECT * 
+             FROM dane
+             left join tab_DANE on dane.DPNOM=tab_DANE.Var1")
+
+View(dane)
+```
+
+# Cantidad de habitantes por departamento:
+
+```{r poblacion}
+habitantes<- sqldf("SELECT DPNOM,sum(dane.habitantes) as habitantes,id
+              FROM dane
+                   Group By DPNOM")
+
+habitantes<- sqldf("SELECT DPNOM,sum(habitantes) as suma_habitantes,id
+              FROM habitantes
+                   Group By id")
+View(habitantes)
+
+
+habitantes<- sqldf("SELECT * 
+              FROM habitantes
+                 left join tab_dsex on habitantes.id=tab_dsex.id")
+```
+
+# Cálculo de indice por departamento
+A continuación se calcula el indice de Violencia Sexual por departamento de acuerdo a la frecuencia de estos delitos y a la población.
+
+```{r indice}
+habitantes$Indice <- habitantes$Freq/habitantes$suma_habitantes
+```
+
+Para poder interpretar este indice de mejor manera se realiza la conversión en indice por cada 100.000 habitantes
+
+```{r indicemil}
+habitantes$Indice <- (habitantes$Indice)*10000
+```
+
+Usando estos elementos anteriormente calculados se crea el dataframe ohsColI2 uniendo los dataframes ohsCol2 (archivo .shp del mapa de colombia) y habitantes:
+
+```{r join_map}
+ohsColI2 <- fortify(ohsCol2)
+ohsColI2<- sqldf("SELECT * 
+              FROM ohsColI2
+                 left join habitantes on ohsColI2.id=habitantes.id")
+```
+
+Con el dataframe resultante se procede a trazar el mapa de Colombia con sus divisiones departamentales, de la siguiente forma:
+
+```{r map_col}
+mapColDep <- ggplot() +
+  geom_polygon(data=ohsColI2, aes(x=long, y=lat, group = group, color = Var1, fill = Indice), colour ="black", size = 0.1) + scale_fill_continuous(low = "green" , high = "red") +
+  labs(title = "Colombia", fill = "") + theme_bw() +
+  labs(x="",y="",title="Indice Delitos Sexuales por Dpto por cada 10.000 habitantes ", size  = 5) +
+  scale_x_continuous(limits=c(-80,-65))+
+  scale_y_continuous(limits=c(-5,13))
+
+```
+
+Se realiza la misma acción con los mapas de San Andrés:
+
+```{r map_sai}
+mapColDepsan <- ggplot() +
+  geom_polygon(data=ohsColI2, aes(x=long, y=lat, group = group,
+                                  fill = Indice), colour ="black", size = 0.1) +
+  labs(title = "San Andrés", fill = "") + theme_bw() +
+  labs(x="",y="",title="San Andrés") + scale_fill_continuous(low = "green" , high = "red") +
+  scale_x_continuous(limits=c(-81.739,-81.685))+
+  scale_y_continuous(limits=c(12.46,12.62))
+
+```
+
+Y Providecia:
+
+```{r map_prov}
+mapColDepprov <- ggplot() +
+  geom_polygon(data=ohsColI2, aes(x=long, y=lat, group = group,
+                    fill = Indice), colour ="black", size = 0.1) +
+  labs(title = "Providencia", fill = "") + theme_bw() +
+  labs(x="",y="",title="Providencia") + scale_fill_continuous(low = "green" , high = "red") +
+  scale_x_continuous(limits=c(-81.4,-81.345))+
+  scale_y_continuous(limits=c(13.3,13.4))
+
+```
+
+```{r layout}
+grid.newpage()
+pushViewport(viewport(layout = grid.layout(2, 2)))
+vplayout <- function(x, y) viewport(layout.pos.row = x, layout.pos.col = y)
+print(mapColDep, vp = vplayout(1:2, 1))  # key is to define vplayout
+print(mapColDepsan, vp = vplayout(1, 2))
+print(mapColDepprov, vp = vplayout(2, 2))
+```
+# Inclusión de indice en la base d_sex3
+
+A continuacion se ingresa la columna de indice en el dataframe d_sex3, tomándola como variable objetivo.
+
+```{r indice_tab}
+tab_indice <- habitantes[,c(3,7)]
+colnames(tab_indice) <- c("id","indice")
+
+d_sex4 <- sqldf("SELECT * 
+              FROM d_sex3
+              left join tab_indice on d_sex3.id=tab_indice.id")
+```
+
+Con este dataframe se procede a realizar análisis de variables asociadas con el indice de violencia por departamento hallado.
+
+```{r indice_school}
+ggplot(d_sex4, aes(x = escolaridad, y = indice)) + geom_boxplot(aes(fill = escolaridad)) +  theme(axis.text.x = element_text(size  = 10,angle = 45,hjust = 1,vjust = 1)) + labs(title = "Cajas y Bigotes escolaridad frente a indice", fill = "") + scale_y_continuous(limits=c(2,15), breaks=seq(2,15,1), expand = c(0, 0)) 
+```
+```{r age_dpto}
+d <- ggplot(d_sex4, aes(x = departamento, y = edad)) + geom_boxplot(aes(fill=sexo), outlier.size = 0.1) +  theme(axis.text.x = element_text(size  = 10,angle = 45,hjust = 1,vjust = 1)) + labs(title = "Edad vs Departemento vs Sexo", fill = "") + scale_y_continuous(limits=c(0,100), breaks=seq(0,100,10), expand = c(0, 0)) 
+d
+```
+
+
+```{r h}
+d_sex4$h <- as.numeric(d_sex4$h)
+h <- ggplot(d_sex4, aes(x = departamento, y = h)) + geom_boxplot(aes(fill=sexo), outlier.size = 0.1) +  theme(axis.text.x = element_text(size  = 10,angle = 45,hjust = 1,vjust = 1)) + labs(title = "Hora vs Departamento vs Sexo", fill = "") + scale_y_continuous(limits=c(0,26), breaks=seq(0,26,2), expand = c(0, 0)) 
+h
+```
+
